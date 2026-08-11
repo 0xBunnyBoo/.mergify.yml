@@ -1,2 +1,84 @@
 # .mergify.yml
 Docs-only PRs (every changed file lives under docs/) skip the e2e gate.
+queue_rules:
+  # Docs-only PRs (every changed file lives under docs/) skip the e2e gate.
+  # Mergify evaluates queue rules in order, so this must come before `main`.
+  # Aggressive batching — no e2e to amortize, so don't make docs PRs wait.
+  - name: docs-only
+    batch_size: 1
+    batch_max_wait_time: 1m
+    checks_timeout: 12h
+    merge_method: squash
+    update_method: rebase
+    merge_conditions: []
+    queue_conditions:
+      - base = main
+      - label!=do-not-merge
+      - -files~=^(?!docs/)
+
+  - name: meta-only
+    batch_size: 1
+    batch_max_wait_time: 1m
+    checks_timeout: 12h
+    merge_method: squash
+    update_method: rebase
+    merge_conditions: []
+    queue_conditions:
+      - base = main
+      - label!=do-not-merge
+      - -files~=^(?!\.mergify\.yml$)
+
+  - name: charts-only
+    batch_size: 1
+    batch_max_wait_time: 1m
+    checks_timeout: 12h
+    merge_method: squash
+    update_method: rebase
+    merge_conditions: []
+    queue_conditions:
+      - base = main
+      - label!=do-not-merge
+      - -files~=^(?!charts/)
+
+  - name: main
+    # Allow 1 retry per-job in case of flaky runner failing the job
+    max_checks_retries: 1
+    batch_size: 3
+    batch_max_wait_time: 1h
+    checks_timeout: 5h
+    merge_method: squash
+    update_method: rebase
+    merge_conditions:
+      # Fail fast: this job throws on a failed docker build, so the batch is
+      # dequeued immediately instead of waiting on the never-emitted e2e check.
+      # `or check-skipped` keeps non-orchestrated contributor PRs (job skipped) green.
+      - or:
+        - check-success = create-e2e-tests-input
+        - check-skipped = create-e2e-tests-input
+      # The standard e2e suite runs as three parallel shards that together cover
+      # exactly the former single-leg suite (the partition is enforced by a
+      # fhevm-cli unit test), so all three must pass. `run-e2e-tests` is the
+      # compute shard, keeping the historical check name.
+      - check-success = run-e2e-tests / fhevm-e2e-test
+      - check-success = run-e2e-tests-shard-decryption / fhevm-e2e-test
+      - check-success = run-e2e-tests-shard-stateful / fhevm-e2e-test
+    queue_conditions:
+      - base = main
+      - label!=do-not-merge
+
+  - name: docs
+    queue_conditions:
+      - base = main
+      - files ~= ^docs/             # touches at least one docs/ file
+      - -files ~= ^(?!docs/).       # AND no file outside docs/
+
+pull_request_rules:
+  - name: merge-queued-label
+    description: Toggle the `merge-queued` label when a pull request is queued
+    conditions:
+      - queue-position > 0
+    actions:
+      label:
+        toggle:
+          - merge-queued
+00
